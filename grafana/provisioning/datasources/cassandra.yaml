@@ -1,0 +1,12 @@
+apiVersion: 1
+
+datasources:
+  - name: Cassandra
+    type: hadesarchitect-cassandra-datasource
+    access: proxy
+    url: cassandra:9042
+    jsonData:
+      keyspace: taxi_streaming
+      consistency: ONE
+    isDefault: true
+    editable: true

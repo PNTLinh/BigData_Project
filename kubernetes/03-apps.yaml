@@ -1,0 +1,172 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: producer-gateway
+  namespace: big-data
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: producer-gateway
+  template:
+    metadata:
+      labels:
+        app: producer-gateway
+    spec:
+      containers:
+      - name: gateway
+        image: big-data-project-producer:latest
+        imagePullPolicy: Never
+        command: ["uvicorn", "kafka.gateway:app", "--host", "0.0.0.0", "--port", "8000"]
+        ports:
+        - containerPort: 8000
+        env:
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: "broker:9092"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "300m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: producer-gateway
+  namespace: big-data
+spec:
+  selector:
+    app: producer-gateway
+  ports:
+  - port: 8000
+    targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spark-streaming
+  namespace: big-data
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: spark-streaming
+  template:
+    metadata:
+      labels:
+        app: spark-streaming
+    spec:
+      containers:
+      - name: spark
+        image: big-data-project-spark:latest
+        imagePullPolicy: Never
+        command:
+        - /opt/spark/bin/spark-submit
+        - --master
+        - local[2]
+        - --driver-memory
+        - 1536m
+        - --conf
+        - spark.cassandra.connection.keepAliveMS=5000
+        - --conf
+        - spark.hadoop.dfs.client.use.datanode.hostname=true
+        - --jars
+        - /opt/spark-jars/spark-sql-kafka-0-10_2.12-3.5.1.jar,/opt/spark-jars/kafka-clients-3.4.1.jar,/opt/spark-jars/spark-token-provider-kafka-0-10_2.12-3.5.1.jar,/opt/spark-jars/commons-pool2-2.11.1.jar,/opt/spark-jars/spark-cassandra-connector-assembly_2.12-3.5.1.jar
+        - --conf
+        - spark.sql.streaming.checkpointLocation=/tmp/spark_checkpoints
+        - /opt/spark-apps/streaming.py
+        env:
+        - name: SPARK_LOCAL_DIRS
+          value: "/tmp"
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: "broker:9092"
+        - name: CASSANDRA_HOST
+          value: "cassandra"
+        # HDFS Integration (Batch Layer)
+        - name: HDFS_NAMENODE
+          value: "hdfs://namenode:8020"
+        resources:
+          requests:
+            memory: "1536Mi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1"
+        volumeMounts:
+        - name: spark-checkpoints
+          mountPath: /tmp/spark_checkpoints
+      volumes:
+      - name: spark-checkpoints
+        persistentVolumeClaim:
+          claimName: spark-checkpoints-pvc
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: spark-checkpoints-pvc
+  namespace: big-data
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spark-batch
+  namespace: big-data
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: spark-batch
+  template:
+    metadata:
+      labels:
+        app: spark-batch
+    spec:
+      containers:
+      - name: spark-batch
+        image: big-data-project-spark:latest
+        imagePullPolicy: Never
+        command: ["python3", "/opt/spark-apps/scheduler.py", "--speedup", "3600.0"]
+        env:
+        - name: SPARK_LOCAL_DIRS
+          value: "/tmp"
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: "broker:9092"
+        - name: CASSANDRA_HOST
+          value: "cassandra"
+        # HDFS Integration (Batch Layer)
+        - name: HDFS_NAMENODE
+          value: "hdfs://namenode:8020"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "200m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        volumeMounts:
+        - name: spark-checkpoints
+          mountPath: /tmp/spark_checkpoints_batch
+      volumes:
+      - name: spark-checkpoints
+        persistentVolumeClaim:
+          claimName: spark-batch-checkpoints-pvc
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: spark-batch-checkpoints-pvc
+  namespace: big-data
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi

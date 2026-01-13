@@ -1,0 +1,185 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "graphTooltip": 0,
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Top Zones by Total Revenue (Hourly)",
+      "datasource": "Cassandra",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "color": { "mode": "palette-classic" }
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "query",
+          "rawQuery": true,
+          "target": "SELECT pickup_zone, window_start AS time, total_revenue AS value FROM taxi_streaming.zone_performance_1h WHERE pickup_zone = 'Midtown' ORDER BY window_start ASC;"
+        },
+        {
+          "refId": "B",
+          "queryType": "query",
+          "rawQuery": true,
+          "target": "SELECT pickup_zone, window_start AS time, total_revenue AS value FROM taxi_streaming.zone_performance_1h WHERE pickup_zone = 'Downtown' ORDER BY window_start ASC;"
+        },
+        {
+          "refId": "C",
+          "queryType": "query",
+          "rawQuery": true,
+          "target": "SELECT pickup_zone, window_start AS time, total_revenue AS value FROM taxi_streaming.zone_performance_1h WHERE pickup_zone = 'Uptown' ORDER BY window_start ASC;"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      }
+    },
+
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Total Trips (5-min)",
+      "datasource": "Cassandra",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "rawQuery": true,
+          "queryType": "query",
+          "target": "SELECT shard_id, window_start AS time, total_trips AS value FROM taxi_streaming.global_kpis_5m WHERE shard_id = 'global' ORDER BY window_start DESC LIMIT 1;"
+        }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+
+    
+    {
+      "id": 61,
+      "type": "stat",
+      "title": "Total Revenue (5-min)",
+      "datasource": "Cassandra",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "currencyUSD" } },
+      "targets": [
+        {
+          "refId": "A",
+          "rawQuery": true,
+          "queryType": "query",
+          "target": "SELECT shard_id, window_start AS time, total_revenue AS value FROM taxi_streaming.global_kpis_5m WHERE shard_id = 'global' ORDER BY window_start DESC LIMIT 1;"
+        }
+      ]
+    },
+
+    {
+      "id": 62,
+      "type": "stat",
+      "title": "Avg Speed (mph)",
+      "datasource": "Cassandra",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 4 },
+      "targets": [
+        {
+          "refId": "A",
+          "rawQuery": true,
+          "queryType": "query",
+          "target": "SELECT shard_id, window_start AS time, avg_speed_mph AS value FROM taxi_streaming.global_kpis_5m WHERE shard_id = 'global' ORDER BY window_start DESC LIMIT 1;"
+        }
+      ]
+    },
+
+    {
+      "id": 63,
+      "type": "stat",
+      "title": "Avg Tip Rate",
+      "datasource": "Cassandra",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 4 },
+      "fieldConfig": { "defaults": { "unit": "percent" } },
+      "targets": [
+        {
+          "refId": "A",
+          "rawQuery": true,
+          "queryType": "query",
+          "target": "SELECT shard_id, window_start AS time, avg_tip_ratio AS value FROM taxi_streaming.global_kpis_5m WHERE shard_id = 'global' ORDER BY window_start DESC LIMIT 1;"
+        }
+      ]
+    },
+    
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Peak vs Off-Peak Trip Distribution",
+      "datasource": "Cassandra",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 9 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "bars", "stacking": { "mode": "normal" } }
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawQuery": true,
+          "queryType": "query",
+          "target": "SELECT peak_category, window_start AS time, total_trips AS value FROM taxi_streaming.peak_analysis_15m WHERE peak_category = 'AM Rush' ORDER BY window_start ASC;"
+        },
+        {
+          "refId": "B",
+          "rawQuery": true,
+          "queryType": "query",
+          "target": "SELECT peak_category, window_start AS time, total_trips AS value FROM taxi_streaming.peak_analysis_15m WHERE peak_category = 'PM Rush' ORDER BY window_start ASC;"
+        },
+        {
+          "refId": "C",
+          "rawQuery": true,
+          "queryType": "query",
+          "target": "SELECT peak_category, window_start AS time, total_trips AS value FROM taxi_streaming.peak_analysis_15m WHERE peak_category = 'Off-Peak' ORDER BY window_start ASC;"
+        }
+      ]
+    },
+
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Payment Type – Trips Over Time",
+      "datasource": "Cassandra",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 9 },
+      "targets": [
+        {
+          "refId": "A",
+          "rawQuery": true,
+          "queryType": "query",
+          "target": "SELECT payment_type, window_start AS time, total_trips AS value FROM taxi_streaming.payment_analysis_15m WHERE payment_type = 'Credit Card' ORDER BY window_start ASC;"
+        },
+        {
+          "refId": "B",
+          "rawQuery": true,
+          "queryType": "query",
+          "target": "SELECT payment_type, window_start AS time, total_trips AS value FROM taxi_streaming.payment_analysis_15m WHERE payment_type = 'Cash' ORDER BY window_start ASC;"
+        }
+      ]
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 27,
+  "style": "dark",
+  "time": { "from": "now-6h", "to": "now" },
+  "title": "NYC Taxi – Streaming Business Dashboard",
+  "uid": "taxi-dashboard-untested2",
+  "version": 2
+}

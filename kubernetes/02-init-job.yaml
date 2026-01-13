@@ -1,0 +1,41 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: init-cassandra
+  namespace: big-data
+spec:
+  template:
+    spec:
+      containers:
+      - name: init-cassandra
+        image: cassandra:4.1
+        command: ["cqlsh", "cassandra", "-f", "/cassandra/init.cql"]
+        volumeMounts:
+        - name: init-script
+          mountPath: /cassandra
+      restartPolicy: OnFailure
+      volumes:
+      - name: init-script
+        configMap:
+          name: cassandra-init
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: init-kafka
+  namespace: big-data
+spec:
+  template:
+    spec:
+      containers:
+      - name: init-kafka
+        image: apache/kafka:latest
+        command: 
+        - /bin/bash
+        - -c
+        - |
+          echo "Waiting for Kafka..."
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server broker:9092 --list
+          echo "Creating topic taxi-trips..."
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server broker:9092 --create --if-not-exists --topic taxi-trips --partitions 1 --replication-factor 1
+      restartPolicy: OnFailure

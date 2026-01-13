@@ -1,0 +1,187 @@
+# HDFS - Hadoop Distributed File System
+#
+# HDFS provides the Batch Layer storage for Lambda Architecture.
+# Raw cleaned data is dumped here for later reprocessing.
+#
+# Components:
+# - NameNode: Metadata server (tracks where files are stored)
+# - DataNode: Storage worker (stores actual data blocks)
+
+---
+# NameNode Service (Headless for StatefulSet)
+apiVersion: v1
+kind: Service
+metadata:
+  name: namenode
+  namespace: big-data
+spec:
+  ports:
+  - port: 8020
+    name: rpc
+  - port: 9870
+    name: http
+  clusterIP: None
+  selector:
+    app: namenode
+
+---
+# NameNode StatefulSet
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: namenode
+  namespace: big-data
+spec:
+  selector:
+    matchLabels:
+      app: namenode
+  serviceName: namenode
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: namenode
+    spec:
+      containers:
+      - name: namenode
+        image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+        ports:
+        - containerPort: 8020
+          name: rpc
+        - containerPort: 9870
+          name: http
+        env:
+        - name: CLUSTER_NAME
+          value: "taxi-cluster"
+        - name: CORE_CONF_fs_defaultFS
+          value: "hdfs://namenode:8020"
+        # Memory optimization
+        - name: HADOOP_OPTS
+          value: "-Xmx512m -Xms512m"
+        # RPC and HTTP bindings
+        - name: HDFS_CONF_dfs_namenode_rpc_address
+          value: "0.0.0.0:8020"
+        - name: HDFS_CONF_dfs_namenode_http_address
+          value: "0.0.0.0:9870"
+        # Disable hostname check for K8s networking
+        - name: HDFS_CONF_dfs_namenode_datanode_registration_ip___hostname___check
+          value: "false"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "200m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        volumeMounts:
+        - name: namenode-data
+          mountPath: /hadoop/dfs/name
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 9870
+          initialDelaySeconds: 30
+          periodSeconds: 10
+  volumeClaimTemplates:
+  - metadata:
+      name: namenode-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 1Gi
+
+---
+# DataNode Service (Headless for StatefulSet)
+apiVersion: v1
+kind: Service
+metadata:
+  name: datanode
+  namespace: big-data
+spec:
+  ports:
+  - port: 9866
+    name: data
+  - port: 9864
+    name: http
+  - port: 9867
+    name: ipc
+  clusterIP: None
+  selector:
+    app: datanode
+
+---
+# DataNode StatefulSet
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: datanode
+  namespace: big-data
+spec:
+  selector:
+    matchLabels:
+      app: datanode
+  serviceName: datanode
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: datanode
+    spec:
+      containers:
+      - name: datanode
+        image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+        ports:
+        - containerPort: 9866
+          name: data
+        - containerPort: 9864
+          name: http
+        - containerPort: 9867
+          name: ipc
+        env:
+        - name: CORE_CONF_fs_defaultFS
+          value: "hdfs://namenode:8020"
+        - name: SERVICE_PRECONDITION
+          value: "namenode:9870"
+        # Memory optimization
+        - name: HADOOP_OPTS
+          value: "-Xmx512m -Xms512m"
+        # DataNode hostname settings (important for K8s networking)
+        - name: HDFS_CONF_dfs_datanode_use_datanode_hostname
+          value: "true"
+        - name: HDFS_CONF_dfs_client_use_datanode_hostname
+          value: "true"
+        - name: HDFS_CONF_dfs_datanode_hostname
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: HDFS_CONF_dfs_datanode_address
+          value: "0.0.0.0:9866"
+        - name: HDFS_CONF_dfs_datanode_http_address
+          value: "0.0.0.0:9864"
+        - name: HDFS_CONF_dfs_datanode_ipc_address
+          value: "0.0.0.0:9867"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "200m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        volumeMounts:
+        - name: datanode-data
+          mountPath: /hadoop/dfs/data
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 9864
+          initialDelaySeconds: 30
+          periodSeconds: 10
+  volumeClaimTemplates:
+  - metadata:
+      name: datanode-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 5Gi
