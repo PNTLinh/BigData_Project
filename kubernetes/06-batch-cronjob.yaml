@@ -1,0 +1,36 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: spark-batch-job
+  namespace: mta-project
+spec:
+  # Chạy vào lúc 00:00 mỗi ngày (Tùy chỉnh theo nhu cầu)
+  schedule: "0 0 * * *" 
+  concurrencyPolicy: Forbid # Không chạy job mới nếu job cũ chưa xong
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: spark-batch
+            image: your-docker-repo/spark-mta:latest # Dùng chung image với streaming
+            command:
+            - /opt/spark/bin/spark-submit
+            args:
+            - --master
+            - local[2]
+            - --driver-memory
+            - 1g
+            - --executor-memory
+            - 1g
+            - --jars
+            - /opt/spark-jars/spark-sql-kafka-0-10_2.12-3.5.1.jar,/opt/spark-jars/spark-cassandra-connector-assembly_2.12-3.5.1.jar
+            - /opt/spark-apps/batch_job.py
+            envFrom:
+            - configMapRef:
+                name: mta-config
+            resources:
+              limits:
+                memory: "2Gi"
+                cpu: "1"
+          restartPolicy: OnFailure

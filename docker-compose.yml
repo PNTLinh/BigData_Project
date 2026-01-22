@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   broker:
     image: apache/kafka:latest
@@ -5,26 +7,22 @@ services:
     hostname: broker
     container_name: broker
     ports:
-      - 9092:9092
+      - "9092:9092"
     volumes:
       - kafka_data:/tmp/kraft-combined-logs
     environment:
-      # --- Tối ưu RAM cho Kafka (Quan trọng) ---
       KAFKA_HEAP_OPTS: "-Xmx400M -Xms400M"
-      # -----------------------------------------
       KAFKA_BROKER_ID: "1"
       KAFKA_PROCESS_ROLES: "broker,controller"
       KAFKA_NODE_ID: "1"
       KAFKA_CONTROLLER_QUORUM_VOTERS: "1@broker:29093"
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT,CONTROLLER:PLAINTEXT"
+      # Sửa: Đảm bảo các listener trỏ đúng hostname
       KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://broker:29092,PLAINTEXT_HOST://localhost:9092"
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
-      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
       KAFKA_LISTENERS: "PLAINTEXT://0.0.0.0:29092,CONTROLLER://0.0.0.0:29093,PLAINTEXT_HOST://0.0.0.0:9092"
       KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
       KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
       KAFKA_LOG_DIRS: "/tmp/kraft-combined-logs"
       CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
     deploy:
@@ -36,16 +34,18 @@ services:
     build: 
       context: .
       dockerfile: kafka/Dockerfile
+    container_name: mta-ace-stream
     depends_on:
       - broker
     environment:
       - KAFKA_BOOTSTRAP_SERVERS=broker:29092
-    command: sh -c "sleep 20 && uv run python producer.py" # Tăng sleep để Kafka kịp thở
+    # Sửa: Dùng wait-for-it hoặc sleep lâu hơn để Kafka kịp Ready
+    command: sh -c "sleep 30 && python /app/kafka/producer.py" 
     restart: unless-stopped
     deploy:
       resources:
         limits:
-          memory: 1G
+          memory: 512M
 
   cassandra:
     image: cassandra:4.1
@@ -56,23 +56,21 @@ services:
       - CASSANDRA_CLUSTER_NAME=TaxiCluster
       - CASSANDRA_DC=datacenter1
       - CASSANDRA_RACK=rack1
-      # --- Tối ưu RAM cho Cassandra (Cực kỳ quan trọng) ---
-      # Giới hạn Heap xuống 2GB (Mặc định nó có thể ăn tới 4GB)
-      - MAX_HEAP_SIZE=2048M
-      - HEAP_NEWSIZE=200M
-      # ----------------------------------------------------
+      - MAX_HEAP_SIZE=512M
+      - HEAP_NEWSIZE=128M
+
     volumes:
       - cassandra_data:/var/lib/cassandra
       - ./cassandra:/docker-entrypoint-initdb.d
     healthcheck:
-      test: ["CMD", "cqlsh", "-e", "describe keyspaces"]
-      interval: 20s
+      test: ["CMD-SHELL", "cqlsh -e 'describe keyspaces'"]
+      interval: 30s
       timeout: 10s
-      retries: 10
+      retries: 5
     deploy:
       resources:
         limits:
-          memory: 2.5G
+          memory: 2G
 
   spark:
     build:
@@ -81,57 +79,104 @@ services:
     container_name: spark
     depends_on:
       cassandra:
-        condition: service_healthy  
+        condition: service_healthy
       broker:
         condition: service_started
-      namenode: # Spark cần chờ HDFS
+      namenode:
         condition: service_started
     ports:
       - "4040:4040"
     volumes:
       - ./spark:/opt/spark-apps
       - spark-checkpoints:/tmp/spark_checkpoints
+      - spark-ivy:/tmp/.ivy2
+    user: "0:0"
     environment:
+      - HOME=/root
+      - USER=root
+      - LOGNAME=root
+      - HADOOP_USER_NAME=root
+      - SPARK_USER=root
+
       - SPARK_LOCAL_DIRS=/tmp
+
+      # App config
       - KAFKA_BOOTSTRAP_SERVERS=broker:29092
+      - KAFKA_TOPIC=mta-ace-stream
       - CASSANDRA_HOST=cassandra
-      - HDFS_NAMENODE=hdfs://namenode:8020
-    # --- Tối ưu Command Spark ---
-    # 1. Giới hạn driver/executor memory
-    # 2. Giảm số core xuống local[2] thay vì local[*] để giảm tải CPU/RAM
+      - CASSANDRA_KEYSPACE=mta_data
+      - CASSANDRA_TABLE=train_updates
+      - HDFS_PATH=hdfs://namenode:8020/mta/history
+      - CHECKPOINT_ROOT=/tmp/spark_checkpoints
+
     command: >
       /opt/spark/bin/spark-submit
       --master local[2]
-      --driver-memory 1536m
-      --executor-memory 1536m
-      --conf spark.cassandra.connection.keepAliveMS=5000
-      --conf spark.hadoop.dfs.client.use.datanode.hostname=true
-      --jars /opt/spark-jars/spark-sql-kafka-0-10_2.12-3.5.1.jar,/opt/spark-jars/kafka-clients-3.4.1.jar,/opt/spark-jars/spark-token-provider-kafka-0-10_2.12-3.5.1.jar,/opt/spark-jars/commons-pool2-2.11.1.jar,/opt/spark-jars/spark-cassandra-connector-assembly_2.12-3.5.1.jar
+      --driver-memory 1g
+      --executor-memory 1g
+      --conf spark.jars.ivy=/tmp/.ivy2
+      --conf spark.hadoop.hadoop.security.authentication=simple
+      --conf spark.hadoop.hadoop.security.authorization=false
+      --conf spark.driver.extraJavaOptions=-Duser.name=spark
+      --conf spark.executor.extraJavaOptions=-Duser.name=spark
       --conf spark.sql.streaming.checkpointLocation=/tmp/spark_checkpoints
       /opt/spark-apps/streaming.py
+
+
+    
+
+    
+
+  namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    container_name: namenode
+    hostname: namenode
+    environment:
+      - CLUSTER_NAME=test
+      - HDFS_CONF_dfs_namenode_rpc_address=namenode:8020
+      - HDFS_CONF_dfs_namenode_http_address=namenode:9870
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:8020
+    ports:
+      - "9870:9870"
+      - "8020:8020"
+    volumes:
+      - hdfs_namenode:/hadoop/dfs/name
     deploy:
       resources:
         limits:
-          memory: 2G
+          memory: 800M
+
+  datanode:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: datanode
+    environment:
+      - SERVICE_PRECONDITION=namenode:9870
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:8020
+      - HDFS_CONF_dfs_datanode_hostname=datanode
+    depends_on:
+      - namenode
+    volumes:
+      - hdfs_datanode:/hadoop/dfs/data
+    deploy:
+      resources:
+        limits:
+          memory: 800M
 
   grafana:
     image: grafana/grafana:latest
     container_name: grafana
     ports:
-      - "3000:3000"
+      - "3001:3000"
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
-      - GF_SECURITY_ADMIN_USER=admin
       - GF_INSTALL_PLUGINS=hadesarchitect-cassandra-datasource
+    depends_on:
+      cassandra:
+        condition: service_healthy
     volumes:
       - grafana_data:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning
-    depends_on:
-      - cassandra
-    deploy:
-      resources:
-        limits:
-          memory: 400M
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
 
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
@@ -141,71 +186,18 @@ services:
     environment:
       - KAFKA_CLUSTERS_0_NAME=local
       - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=broker:29092
-      - KAFKA_CLUSTERS_0_METRICS_PORT=9997
     depends_on:
       - broker
     deploy:
       resources:
         limits:
-          memory: 400M
-  
-  namenode:
-    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
-    container_name: namenode
-    hostname: namenode
-    user: root
-    environment:
-      - CLUSTER_NAME=test
-      - JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64
-      # Tăng RAM lên 512m để xử lý request tốt hơn
-      - HADOOP_OPTS=-Xmx512m -Xms512m
-      # --- QUAN TRỌNG NHẤT: Ép mở cổng 9000 cho tất cả IP ---
-      - HDFS_CONF_dfs_namenode_rpc_address=0.0.0.0:9000
-      - HDFS_CONF_dfs_namenode_http_address=0.0.0.0:9870
-      - CORE_CONF_fs_defaultFS=hdfs://namenode:8020
-      # -------------------------------------------------------
-    ports:
-      - "9870:9870"
-      - "9000:9000"
-    volumes:
-      - hdfs_namenode:/hadoop/dfs/name
-    deploy:
-      resources:
-        limits:
-          memory: 1G
-
-  # --- THÊM: HDFS DataNode (Worker) ---
-  datanode:
-    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
-    container_name: datanode
-    hostname: datanode
-    user: root
-    environment:
-      - SERVICE_PRECONDITION=namenode:9870
-      # Tối ưu RAM cực gắt: Chỉ cho 256MB Heap
-      - JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64
-      - HADOOP_OPTS=-Xmx512m -Xms512m
-      - CORE_CONF_fs_defaultFS=hdfs://namenode:8020
-      - HDFS_CONF_dfs_datanode_use_datanode_hostname=true
-      - HDFS_CONF_dfs_client_use_datanode_hostname=true
-      - HDFS_CONF_dfs_datanode_address=0.0.0.0:9866
-      - HDFS_CONF_dfs_datanode_http_address=0.0.0.0:9864
-      - HDFS_CONF_dfs_datanode_ipc_address=0.0.0.0:9867
-      # Thêm dòng này cho chắc ăn để nó biết tên nó là gì
-      - HDFS_CONF_dfs_datanode_hostname=datanode
-    volumes:
-      - hdfs_datanode:/hadoop/dfs/data
-    depends_on:
-      - namenode
-    deploy:
-      resources:
-        limits:
-          memory: 1G
+          memory: 300M
 
 volumes:
   cassandra_data:
   grafana_data:
   spark-checkpoints:
+  spark-ivy:
   kafka_data:
   hdfs_namenode:
   hdfs_datanode:

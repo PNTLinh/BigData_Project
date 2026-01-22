@@ -1,0 +1,15 @@
+apiVersion: 1
+
+datasources:
+  - name: Cassandra-MTA
+    uid: cassandra-mta
+    type: hadesarchitect-cassandra-datasource
+    access: proxy
+    url: cassandra
+    port: 9042
+    isDefault: true
+    jsonData:
+      keyspace: mta_data
+      contactPoints: ["cassandra"]
+      consistency: "ONE"
+    editable: true

@@ -1,41 +1,51 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: init-cassandra
-  namespace: big-data
+  name: cassandra-init
+  namespace: mta-project
 spec:
   template:
     spec:
       containers:
-      - name: init-cassandra
+      - name: init
         image: cassandra:4.1
-        command: ["cqlsh", "cassandra", "-f", "/cassandra/init.cql"]
-        volumeMounts:
-        - name: init-script
-          mountPath: /cassandra
-      restartPolicy: OnFailure
-      volumes:
-      - name: init-script
-        configMap:
-          name: cassandra-init
----
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: init-kafka
-  namespace: big-data
-spec:
-  template:
-    spec:
-      containers:
-      - name: init-kafka
-        image: apache/kafka:latest
         command: 
-        - /bin/bash
-        - -c
+        - "/bin/bash"
+        - "-c"
         - |
-          echo "Waiting for Kafka..."
-          /opt/kafka/bin/kafka-topics.sh --bootstrap-server broker:9092 --list
-          echo "Creating topic taxi-trips..."
-          /opt/kafka/bin/kafka-topics.sh --bootstrap-server broker:9092 --create --if-not-exists --topic taxi-trips --partitions 1 --replication-factor 1
+          # Chờ cho đến khi Cassandra Service sẵn sàng
+          until cqlsh cassandra-service -e "describe cluster"; do
+            echo "Đang chờ Cassandra khởi động..."
+            sleep 5
+          done
+          
+          # Thực thi lệnh tạo Keyspace và Tables
+          cqlsh cassandra-service -e "
+            -- 1. Tạo Keyspace
+            CREATE KEYSPACE IF NOT EXISTS mta_data 
+            WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1};
+
+            USE mta_data;
+
+            -- 2. Bảng cho Speed Layer (Dữ liệu thời gian thực)
+            CREATE TABLE IF NOT EXISTS train_updates (
+                trip_id text,
+                route_id text,
+                stop_id text,
+                arrival_timestamp bigint,
+                processed_at timestamp,
+                PRIMARY KEY ((route_id), stop_id, trip_id)
+            );
+
+            -- 3. Bảng cho Batch Layer (Dữ liệu tổng hợp lịch sử)
+            CREATE TABLE IF NOT EXISTS daily_route_stats (
+                arrival_date date,
+                route_id text,
+                total_trips bigint,
+                avg_arrival_ts double,
+                PRIMARY KEY (arrival_date, route_id)
+            );
+          "
+          echo "Khởi tạo database thành công!"
       restartPolicy: OnFailure
+  backoffLimit: 10 # Cho phép thử lại nhiều lần nếu Cassandra khởi động chậm

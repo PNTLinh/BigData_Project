@@ -1,17 +1,13 @@
-FROM python:3.12-slim
-
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
-
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+FROM python:3.9-slim
 
 WORKDIR /app
 
-COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen
+# Cài dependency
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
 
+# Copy toàn bộ thư mục kafka vào container
 COPY kafka/ /app/kafka/
-COPY data/ /app/data/
 
-WORKDIR /app/kafka
-
-CMD ["uv", "run", "python", "producer.py"]
+# Chạy producer đúng path
+CMD ["python", "/app/kafka/producer.py"]

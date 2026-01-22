@@ -1,52 +1,71 @@
-﻿# Dự Án Phân Tích Dữ Liệu Taxi NYC
+# MTA Real-time Data Pipeline (Lambda Architecture)
 
-Dự án này xây dựng một hệ thống xử lý dữ liệu tự động: Dữ liệu từ xe taxi chảy qua Kafka, được Spark tính toán ngay lập tức, lưu vào Cassandra và hiển thị biểu đồ lên Grafana.
+Dự án này xây dựng một hệ thống xử lý dữ liệu lớn (Big Data) theo kiến trúc **Lambda**, cho phép thu thập, xử lý và phân tích dữ liệu giao thông công cộng (tuyến tàu ACE của New York) theo thời gian thực (Real-time) và theo lô (Batch).
 
-## 1. Sơ đồ hoạt động
-Dữ liệu di chuyển theo luồng: Dữ liệu gốc (Parquet) → Kafka (Trạm trung chuyển) → Spark (Bộ não tính toán) → Cassandra (Kho lưu trữ) → Grafana (Biểu đồ hiển thị).
+## 🚀 Kiến trúc hệ thống
 
-## 2. Các công cụ chính
-Kafka: Tiếp nhận dữ liệu khổng lồ theo thời gian thực.
+Hệ thống bao gồm 4 lớp chính:
 
-Spark: Tính toán các con số (tổng chuyến xe, doanh thu) theo từng khung giờ.
+1. **Source & Ingestion Layer**: Sử dụng **Python Producer** để fetch dữ liệu từ MTA API và đẩy vào **Apache Kafka**.
+2. **Speed Layer**: **Spark Streaming** tiêu thụ dữ liệu từ Kafka, xử lý tức thì và ghi vào **Cassandra**.
+3. **Batch Layer (Cold Storage)**: Dữ liệu thô được lưu trữ tại **Hadoop HDFS**. Định kỳ, một **Spark Batch Job** sẽ tổng hợp dữ liệu lịch sử và ghi kết quả vào Cassandra.
+4. **Serving & Visualization Layer**: **Cassandra** cung cấp dữ liệu cho **Grafana** để hiển thị Dashboard thời gian thực.
 
-Cassandra: Cơ sở dữ liệu chuyên dùng để lưu trữ dữ liệu lớn và nhanh.
+## 📂 Cấu trúc thư mục
 
-Grafana: Nơi vẽ các biểu đồ xanh đỏ giúp chúng ta dễ dàng theo dõi.
-
-HDFS: Kho lưu trữ dự phòng lâu dài.
-
-## 3. Cách chạy hệ thống
-
-### Bước 1: Khởi động 
-
-```
-docker compose up -d
-```
-### Bước 2: Kiểm tra log file
+```text
+FINAL/
+├── cassandra/          # File khởi tạo database (.cql)
+├── grafana/            # Cấu hình tự động cho Dashboard & Datasource
+├── kafka/              # Mã nguồn Producer và Dockerfile cho Kafka App
+├── spark/              # Mã nguồn xử lý Streaming và Batch
+├── kubernetes/         # Các file YAML để triển khai lên Cluster K8s
+└── docker-compose.yml  # Triển khai nhanh môi trường phát triển (Local)
 
 ```
-docker logs -f spark
-docker logs -f producer
+
+## 🛠️ Hướng dẫn cài đặt
+
+### Yêu cầu hệ thống
+
+* Docker & Docker Desktop
+* Kubernetes (đã được enable trong Docker Desktop)
+* Python 3.9+
+
+### Triển khai trên Kubernetes
+
+Triển khai theo thứ tự các file cấu hình để đảm bảo các phụ thuộc được đáp ứng:
+
+1. **Khởi tạo Core & Storage:**
+```bash
+kubectl apply -f kubernetes/00-core.yaml
+kubectl apply -f kubernetes/01-data-layer.yaml
+kubectl apply -f kubernetes/05-hdfs.yaml
+
 ```
 
-### Bước 3: Xem kết quả
-Biểu đồ Grafana: Truy cập http://localhost:3000 (Tài khoản: admin / Mật khẩu: admin).
 
-Dữ liệu thô trong Cassandra: docker exec -it cassandra cqlsh
+2. **Khởi tạo Database (Chờ Cassandra sẵn sàng):**
+```bash
+kubectl apply -f kubernetes/02-init-job.yaml
 
-## 4. Các lệnh xử lý lỗi
+```
 
-Xóa hết làm lại: docker compose down -v
 
-Xóa bộ nhớ tạm của Spark: rm -rf /tmp/spark_checkpoints
+3. **Triển khai Ứng dụng & Dashboard:**
+```bash
+kubectl apply -f kubernetes/03-apps.yaml
+kubectl apply -f kubernetes/04-ui.yaml
+kubectl apply -f kubernetes/06-batch-cronjob.yaml
 
-Tạo lại bảng dữ liệu: docker exec -i cassandra cqlsh < cassandra/init.cql
+```
 
-## 5. Kết quả đạt được
 
-Tổng số chuyến xe theo thời gian thực.
 
-Doanh thu của các khu vực trong thành phố.
+## 📊 Theo dõi kết quả
 
-Loại hình thanh toán (tiền mặt hay thẻ) phổ biến nhất.
+* **Grafana Dashboard**: Truy cập `http://localhost:3000` (admin/admin) để xem biểu đồ tàu chạy thực tế.
+* **Kafka UI**: Truy cập `http://localhost:8080` để giám sát các luồng tin nhắn trong Kafka.
+* **HDFS Web UI**: Truy cập `http://localhost:9870` để kiểm tra các file lưu trữ lịch sử.
+
+

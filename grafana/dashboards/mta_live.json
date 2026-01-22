@@ -1,0 +1,22 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "schemaVersion": 38,
+  "title": "MTA Real-time Monitor",
+  "uid": "mta_live_001",
+  "panels": [
+    {
+      "type": "table",
+      "title": "Danh sách tàu ACE sắp đến ga",
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "type": "hadesarchitect-cassandra-datasource", "uid": "cassandra-mta" },
+      "targets": [
+        {
+          "refId": "A",
+          "rawQuery": true,
+          "query": "SELECT route_id, trip_id, stop_id, arrival_timestamp, processed_at FROM mta_data.train_updates LIMIT 100"
+        }
+      ]
+    }
+  ]
+}
